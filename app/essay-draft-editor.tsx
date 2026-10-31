@@ -1,15 +1,15 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
-import { AlignLeft, CheckCircle2, FileText, Goal, Highlighter, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlignLeft, CheckCircle2, Cloud, CloudOff, Database, FilePlus2, FileText, Goal, Highlighter, Loader2, Plus, Sparkles, Trash2, X } from 'lucide-react';
 
-import { CandidateComparison } from '@/app/candidate-comparison';
+import { CandidateComparison, type ComparisonPersistenceState } from '@/app/candidate-comparison';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import type { CharacterCountMode, ProtectedExpression, ProtectedExpressionCategory } from '@/lib/contracts';
+import type { CharacterCountMode, ProtectedExpression, ProtectedExpressionCategory, WorkRecord, WorkStep, WorkSummary } from '@/lib/contracts';
 import { getCharacterCountSnapshot, normalizeTargetLengthInput } from '@/lib/text-count';
 
 const countModeOptions: Array<{ value: CharacterCountMode; label: string }> = [
@@ -35,6 +35,15 @@ interface PendingSelection {
   text: string;
 }
 
+type SaveStatus = 'loading' | 'idle' | 'saving' | 'saved' | 'error' | 'not-configured';
+
+const emptyComparisonState: ComparisonPersistenceState = {
+  mode: 'generate',
+  revisedText: '',
+  candidates: [],
+  manualVersion: '',
+};
+
 function normalizeSelection(source: string, selectionStart: number, selectionEnd: number): PendingSelection | null {
   let start = Math.min(selectionStart, selectionEnd);
   let end = Math.max(selectionStart, selectionEnd);
@@ -46,14 +55,176 @@ function normalizeSelection(source: string, selectionStart: number, selectionEnd
 }
 
 export function EssayDraftEditor() {
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState('제목 없는 글');
+  const [savedDrafts, setSavedDrafts] = useState<WorkSummary[]>([]);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('loading');
+  const [saveMessage, setSaveMessage] = useState('저장소 연결을 확인하고 있습니다.');
+  const [persistenceReady, setPersistenceReady] = useState(false);
   const [originalText, setOriginalText] = useState('');
   const [targetLength, setTargetLength] = useState(500);
   const [countMode, setCountMode] = useState<CharacterCountMode>('include-whitespace');
-  const [currentStep, setCurrentStep] = useState<'input' | 'protect' | 'compare'>('input');
+  const [currentStep, setCurrentStep] = useState<WorkStep>('input');
   const [protectedExpressions, setProtectedExpressions] = useState<ProtectedExpression[]>([]);
+  const [comparisonState, setComparisonState] = useState<ComparisonPersistenceState>(emptyComparisonState);
   const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
   const [protectedCategory, setProtectedCategory] = useState<ProtectedExpressionCategory>('effort');
   const selectionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const skipNextSave = useRef(false);
+  const persistenceDisabled = useRef(false);
+
+  const applyDraft = useCallback((draft: WorkRecord) => {
+    skipNextSave.current = true;
+    setDraftId(draft.id);
+    setDraftTitle(draft.title);
+    setOriginalText(draft.originalText);
+    setTargetLength(draft.targetLength);
+    setCountMode(draft.countMode);
+    setCurrentStep(draft.currentStep);
+    setProtectedExpressions(draft.protectedExpressions);
+    setComparisonState({
+      mode: draft.comparisonMode,
+      revisedText: draft.revisedText,
+      candidates: draft.candidates,
+      manualVersion: draft.manualVersion,
+    });
+    setPendingSelection(null);
+    setSaveStatus('saved');
+    setSaveMessage('저장된 글을 불러왔습니다.');
+  }, []);
+
+  const loadDraft = useCallback(async (id: string) => {
+    setSaveStatus('loading');
+    setSaveMessage('저장된 글을 불러오는 중입니다.');
+    try {
+      const response = await fetch(`/api/drafts/${encodeURIComponent(id)}`);
+      const result = (await response.json()) as { draft?: WorkRecord; message?: string };
+      if (!response.ok || !result.draft) throw new Error(result.message || '저장된 글을 불러오지 못했습니다.');
+      applyDraft(result.draft);
+    } catch (error) {
+      setSaveStatus('error');
+      setSaveMessage(error instanceof Error ? error.message : '저장된 글을 불러오지 못했습니다.');
+    }
+  }, [applyDraft]);
+
+  const startNewDraft = useCallback(() => {
+    skipNextSave.current = true;
+    setDraftId(null);
+    setDraftTitle('제목 없는 글');
+    setOriginalText('');
+    setTargetLength(500);
+    setCountMode('include-whitespace');
+    setCurrentStep('input');
+    setProtectedExpressions([]);
+    setComparisonState(emptyComparisonState);
+    setPendingSelection(null);
+    setSaveStatus('idle');
+    setSaveMessage('원문을 입력하면 자동 저장됩니다.');
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const initialize = async () => {
+      try {
+        const response = await fetch('/api/drafts');
+        const result = (await response.json()) as { drafts?: WorkSummary[]; message?: string; code?: string };
+        if (!response.ok || !result.drafts) {
+          if (result.code === 'DRAFT_DATABASE_NOT_CONFIGURED') {
+            persistenceDisabled.current = true;
+            setSaveStatus('not-configured');
+            setSaveMessage('Supabase 연결 후 자동 저장을 사용할 수 있습니다.');
+            return;
+          }
+          throw new Error(result.message || '저장 목록을 불러오지 못했습니다.');
+        }
+        if (cancelled) return;
+        setSavedDrafts(result.drafts);
+        if (result.drafts[0]) await loadDraft(result.drafts[0].id);
+        else {
+          setSaveStatus('idle');
+          setSaveMessage('원문을 입력하면 자동 저장됩니다.');
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setSaveStatus('error');
+        setSaveMessage(error instanceof Error ? error.message : '저장소 연결을 확인하지 못했습니다.');
+      } finally {
+        if (!cancelled) setPersistenceReady(true);
+      }
+    };
+    void initialize();
+    return () => { cancelled = true; };
+  }, [loadDraft]);
+
+  useEffect(() => {
+    if (!persistenceReady || persistenceDisabled.current) return;
+    if (skipNextSave.current) {
+      skipNextSave.current = false;
+      return;
+    }
+    if (!draftId && originalText.trim().length === 0) return;
+
+    const timer = window.setTimeout(async () => {
+      setSaveStatus('saving');
+      setSaveMessage('변경 내용을 저장하는 중입니다.');
+      const payload = {
+        title: draftTitle,
+        originalText,
+        targetLength,
+        countMode,
+        protectedExpressions,
+        currentStep,
+        comparisonMode: comparisonState.mode,
+        revisedText: comparisonState.revisedText,
+        candidates: comparisonState.candidates,
+        manualVersion: comparisonState.manualVersion,
+        selectedCandidateId: null,
+        finalText: null,
+      };
+
+      try {
+        const response = await fetch(draftId ? `/api/drafts/${draftId}` : '/api/drafts', {
+          method: draftId ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const result = (await response.json()) as { draft?: WorkRecord; message?: string; code?: string };
+        if (!response.ok || !result.draft) {
+          if (result.code === 'DRAFT_DATABASE_NOT_CONFIGURED') {
+            persistenceDisabled.current = true;
+            setSaveStatus('not-configured');
+            setSaveMessage('Supabase 연결 후 자동 저장을 사용할 수 있습니다.');
+            return;
+          }
+          throw new Error(result.message || '자동 저장에 실패했습니다.');
+        }
+        if (!draftId) skipNextSave.current = true;
+        setDraftId(result.draft.id);
+        setSavedDrafts((current) => [
+          {
+            id: result.draft!.id,
+            title: result.draft!.title,
+            currentStep: result.draft!.currentStep,
+            originalLength: Array.from(result.draft!.originalText).length,
+            createdAt: result.draft!.createdAt,
+            updatedAt: result.draft!.updatedAt,
+          },
+          ...current.filter((item) => item.id !== result.draft!.id),
+        ]);
+        setSaveStatus('saved');
+        setSaveMessage('모든 변경 내용이 저장되었습니다.');
+      } catch (error) {
+        setSaveStatus('error');
+        setSaveMessage(error instanceof Error ? error.message : '자동 저장에 실패했습니다.');
+      }
+    }, 900);
+
+    return () => window.clearTimeout(timer);
+  }, [comparisonState, countMode, currentStep, draftId, draftTitle, originalText, persistenceReady, protectedExpressions, targetLength]);
+
+  const updateComparisonState = useCallback((state: ComparisonPersistenceState) => {
+    setComparisonState(state);
+  }, []);
 
   const countSnapshot = useMemo(
     () => getCharacterCountSnapshot(originalText, targetLength, countMode),
@@ -129,6 +300,59 @@ export function EssayDraftEditor() {
           </span>
         </div>
       </header>
+
+      <section className="mx-auto max-w-6xl px-5 pt-6 sm:px-8" aria-label="글 저장 상태">
+        <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm backdrop-blur lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_auto] lg:items-end">
+          <div>
+            <label htmlFor="draft-title" className="mb-2 flex items-center gap-2 text-sm font-extrabold text-slate-800">
+              <Database aria-hidden="true" className="size-4 text-blue-700" />
+              저장할 글 제목
+            </label>
+            <Input
+              id="draft-title"
+              value={draftTitle}
+              maxLength={100}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              className="h-11 bg-white text-base font-semibold"
+              placeholder="글 제목을 입력하세요"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="saved-draft" className="mb-2 block text-sm font-extrabold text-slate-800">저장된 글 불러오기</label>
+            <select
+              id="saved-draft"
+              value={draftId ?? ''}
+              onChange={(event) => {
+                if (event.target.value) void loadDraft(event.target.value);
+                else startNewDraft();
+              }}
+              className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-3 focus:ring-blue-100"
+            >
+              <option value="">새 글</option>
+              {savedDrafts.map((draft) => (
+                <option key={draft.id} value={draft.id}>{draft.title}</option>
+              ))}
+            </select>
+          </div>
+
+          <Button type="button" variant="outline" onClick={startNewDraft} className="h-11 rounded-xl px-4 font-extrabold">
+            <FilePlus2 aria-hidden="true" />
+            새 글 작성
+          </Button>
+
+          <div className={`flex items-center gap-2 text-sm font-semibold lg:col-span-3 ${saveStatus === 'error' || saveStatus === 'not-configured' ? 'text-rose-700' : saveStatus === 'saved' ? 'text-emerald-700' : 'text-slate-500'}`} aria-live="polite">
+            {saveStatus === 'loading' || saveStatus === 'saving' ? (
+              <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+            ) : saveStatus === 'error' || saveStatus === 'not-configured' ? (
+              <CloudOff aria-hidden="true" className="size-4" />
+            ) : (
+              <Cloud aria-hidden="true" className="size-4" />
+            )}
+            {saveMessage}
+          </div>
+        </div>
+      </section>
 
       <section className={`mx-auto grid gap-6 px-5 py-8 sm:px-8 lg:py-12 ${currentStep === 'compare' ? 'max-w-[1500px] lg:grid-cols-[minmax(0,1fr)_260px]' : 'max-w-6xl lg:grid-cols-[minmax(0,1fr)_280px]'}`}>
         <div className="rounded-3xl border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.08)]">
@@ -208,6 +432,7 @@ export function EssayDraftEditor() {
                 onChange={(event) => {
                   setOriginalText(event.target.value);
                   setProtectedExpressions([]);
+                  setComparisonState(emptyComparisonState);
                   setPendingSelection(null);
                 }}
                 placeholder="자기소개서나 지원서의 원문을 입력하세요."
@@ -434,10 +659,13 @@ export function EssayDraftEditor() {
 
           {currentStep === 'compare' && (
             <CandidateComparison
+              key={draftId ?? 'new-draft'}
               originalText={originalText}
               targetLength={targetLength}
               countMode={countMode}
               protectedExpressions={protectedExpressions}
+              initialState={comparisonState}
+              onStateChange={updateComparisonState}
               onBack={() => setCurrentStep('protect')}
             />
           )}

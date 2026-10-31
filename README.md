@@ -14,8 +14,9 @@
 - [x] 보호 표현 마스킹·원문 복원과 후보별 수정 내역 표시
 - [x] 자기소개서 최소 수정 매뉴얼 v1과 목표 글자 수·숫자·상투어 자동 검증
 - [x] 검사 실패 후보의 1회 미세 재수정과 남은 경고 표시
+- [x] Supabase 기반 작성 글 자동 저장·목록 조회·불러오기
 - [ ] 최종 편집과 저장
-- [ ] 배포 환경의 Gemini API 키 및 Supabase 연동
+- [ ] Supabase 로그인과 다른 기기 간 작성 글 동기화
 
 ## 구조
 
@@ -26,8 +27,11 @@
 - `lib/self-introduction-manual.ts`: Gemini가 따르는 버전형 자기소개서 편집 매뉴얼
 - `lib/candidate-quality.ts`: 생성 후보의 글자 수·숫자·상투어·문장 완결 검사
 - `app/api/generate/route.ts`: Gemini API 키를 숨긴 서버 전용 생성 경로
+- `app/api/drafts/route.ts`: 브라우저별 저장 글 목록과 신규 저장 경로
+- `app/api/drafts/[id]/route.ts`: 저장 글 불러오기·수정·삭제 경로
 - `app/candidate-comparison.tsx`: 새 축약안 생성 또는 이전본·현재본 비교와 후보 3종 확인 화면
 - `app/essay-draft-editor.tsx`: 현재 입력 화면
+- `supabase/migrations`: Supabase에 적용할 DB 스키마
 
 ## Gemini 연결
 
@@ -43,3 +47,11 @@ pnpm build
 ```
 
 UI 컴포넌트는 Gemini API 키를 직접 사용하지 않고 `/api/generate` 서버 경로만 호출합니다. Supabase도 같은 방식으로 UI와 저장 구현을 분리합니다.
+
+## Supabase 연결
+
+1. Supabase SQL Editor에서 `supabase/migrations/202610310001_create_drafts.sql`을 실행합니다.
+2. 로컬 `.env.local`과 Vercel Production/Preview 환경에 `SUPABASE_URL`, `SUPABASE_SECRET_KEY`를 설정합니다.
+3. 배포를 다시 실행합니다.
+
+Supabase 비밀 키는 서버 API에서만 사용합니다. 브라우저별 HttpOnly 쿠키를 해시한 값으로 글 소유자를 구분하므로 실제 쿠키 값은 DB에 저장하지 않습니다.

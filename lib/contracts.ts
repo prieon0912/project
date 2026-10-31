@@ -2,6 +2,7 @@ export type CharacterCountMode = 'include-whitespace' | 'exclude-whitespace';
 export type CandidateKind = 'preserve' | 'balanced' | 'aggressive';
 export type GenerationMode = 'generate' | 'reconcile';
 export type SemanticRisk = 'maintained' | 'weakened' | 'heavily-weakened';
+export type WorkStep = 'input' | 'protect' | 'compare';
 
 export type ProtectedExpressionCategory =
   | 'effort'
@@ -61,14 +62,26 @@ export interface WorkDraft {
   targetLength: number;
   countMode: CharacterCountMode;
   protectedExpressions: ProtectedExpression[];
+  currentStep: WorkStep;
+  comparisonMode: GenerationMode;
+  revisedText: string;
+  candidates: GeneratedCandidate[];
+  manualVersion: string;
+  selectedCandidateId: string | null;
+  finalText: string | null;
 }
 
 export interface WorkRecord extends WorkDraft {
   id: string;
-  userId: string;
-  candidates: GeneratedCandidate[];
-  selectedCandidateId: string | null;
-  finalText: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkSummary {
+  id: string;
+  title: string;
+  currentStep: WorkStep;
+  originalLength: number;
   createdAt: string;
   updatedAt: string;
 }

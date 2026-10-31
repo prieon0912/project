@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Bot, CheckCircle2, FilePenLine, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +20,15 @@ interface CandidateComparisonProps {
   countMode: CharacterCountMode;
   protectedExpressions: ProtectedExpression[];
   onBack: () => void;
+  initialState?: ComparisonPersistenceState;
+  onStateChange?: (state: ComparisonPersistenceState) => void;
+}
+
+export interface ComparisonPersistenceState {
+  mode: ComparisonMode;
+  revisedText: string;
+  candidates: GeneratedCandidate[];
+  manualVersion: string;
 }
 
 const candidateTones: Record<GeneratedCandidate['kind'], string> = {
@@ -158,11 +167,11 @@ function CandidateCard({
   );
 }
 
-export function CandidateComparison({ originalText, targetLength, countMode, protectedExpressions, onBack }: CandidateComparisonProps) {
-  const [mode, setMode] = useState<ComparisonMode>('generate');
-  const [revisedText, setRevisedText] = useState('');
-  const [candidates, setCandidates] = useState<GeneratedCandidate[]>([]);
-  const [manualVersion, setManualVersion] = useState('');
+export function CandidateComparison({ originalText, targetLength, countMode, protectedExpressions, onBack, initialState, onStateChange }: CandidateComparisonProps) {
+  const [mode, setMode] = useState<ComparisonMode>(initialState?.mode ?? 'generate');
+  const [revisedText, setRevisedText] = useState(initialState?.revisedText ?? '');
+  const [candidates, setCandidates] = useState<GeneratedCandidate[]>(initialState?.candidates ?? []);
+  const [manualVersion, setManualVersion] = useState(initialState?.manualVersion ?? '');
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
   const revisedLength = countCharacters(revisedText, countMode);
@@ -170,6 +179,10 @@ export function CandidateComparison({ originalText, targetLength, countMode, pro
     () => diffText(originalText, revisedText).filter((segment) => segment.type !== 'same' && segment.text.trim().length > 0),
     [originalText, revisedText],
   );
+
+  useEffect(() => {
+    onStateChange?.({ mode, revisedText, candidates, manualVersion });
+  }, [candidates, manualVersion, mode, onStateChange, revisedText]);
 
   const generateCandidates = async () => {
     if (mode === 'reconcile' && revisedText.trim().length === 0) return;
