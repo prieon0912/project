@@ -267,7 +267,7 @@ export function EssayDraftEditor() {
     input: {
       badge: '입력 단계',
       title: '줄이고 싶은 글을 입력하세요',
-      description: '원문과 목표 글자 수를 설정합니다. 입력한 내용은 아직 서버로 전송되지 않습니다.',
+      description: '원문과 목표 글자 수를 설정합니다. 변경한 내용은 Supabase에 자동 저장됩니다.',
     },
     protect: {
       badge: '보호 표현 단계',
