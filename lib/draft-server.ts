@@ -29,7 +29,7 @@ export class DraftDatabaseNotConfiguredError extends Error {}
 let databaseClient: SupabaseClient | null = null;
 
 export function getDraftDatabase(): SupabaseClient {
-  const url = process.env.SUPABASE_URL;
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const secret = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !secret) throw new DraftDatabaseNotConfiguredError('Supabase 환경변수가 설정되지 않았습니다.');
   databaseClient ??= createClient(url, secret, {
