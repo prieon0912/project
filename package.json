@@ -12,7 +12,7 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
-    "test": "node --test lib/text-count.test.ts lib/protected-text.test.ts lib/candidate-quality.test.ts lib/draft-storage.test.ts"
+    "test": "node --test lib/text-count.test.ts lib/protected-text.test.ts lib/candidate-quality.test.ts lib/draft-storage.test.ts lib/gemini-fallback.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

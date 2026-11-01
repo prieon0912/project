@@ -1,5 +1,6 @@
 import type { CandidateKind, GeneratedCandidate, GenerationMode, SemanticRisk } from '@/lib/contracts';
 import { inspectCandidateQuality } from '@/lib/candidate-quality';
+import { buildGeminiModelChain, classifyGeminiFailure } from '@/lib/gemini-fallback';
 import { SELF_INTRODUCTION_EDITING_MANUAL, SELF_INTRODUCTION_MANUAL_VERSION } from '@/lib/self-introduction-manual';
 import { countCharacters } from '@/lib/text-count';
 
@@ -21,6 +22,18 @@ interface GeminiRequestBody {
 interface GeminiApiResponse {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   error?: { message?: string };
+}
+
+class GeminiApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryable: boolean,
+    readonly capacityRelated: boolean,
+    readonly quotaRelated: boolean,
+  ) {
+    super(message);
+  }
 }
 
 const allowedKinds = new Set<CandidateKind>(['preserve', 'balanced', 'aggressive']);
@@ -192,12 +205,22 @@ async function requestGeminiWithPrompt(
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: 'application/json', temperature: 0.15 },
       }),
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.timeout(30_000),
     },
   );
 
   const result = (await response.json()) as GeminiApiResponse;
-  if (!response.ok) throw new Error(result.error?.message || `Gemini 요청이 실패했습니다. (${response.status})`);
+  if (!response.ok) {
+    const message = result.error?.message || `Gemini 요청이 실패했습니다. (${response.status})`;
+    const classification = classifyGeminiFailure(response.status, message);
+    throw new GeminiApiError(
+      message,
+      response.status,
+      classification.retryable,
+      classification.capacityRelated,
+      classification.quotaRelated,
+    );
+  }
   const rawText = result.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
   if (!rawText) throw new Error('Gemini가 빈 응답을 반환했습니다.');
   return parseCandidates(JSON.parse(rawText.replace(/^```json\s*|\s*```$/gu, '')), body);
@@ -297,9 +320,13 @@ export async function POST(request: Request) {
       return Response.json({ code: 'INVALID_REQUEST', message: '분석 요청 값이 올바르지 않습니다.', retryable: false }, { status: 400 });
     }
 
-    const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    const models = buildGeminiModelChain(process.env.GEMINI_MODEL, process.env.GEMINI_FALLBACK_MODELS);
     let lastError: unknown;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    let sawCapacityError = false;
+    let sawQuotaError = false;
+    const attemptedModels: string[] = [];
+    for (const model of models) {
+      attemptedModels.push(model);
       try {
         let candidates = await requestGemini(body, apiKey, model);
         const initialIssues = collectQualityIssues(candidates, body);
@@ -335,13 +362,36 @@ export async function POST(request: Request) {
           schemaVersion: 1,
           requestId: crypto.randomUUID(),
           manualVersion: SELF_INTRODUCTION_MANUAL_VERSION,
+          model,
           candidates,
         });
       } catch (error) {
         lastError = error;
+        if (error instanceof GeminiApiError) {
+          sawCapacityError ||= error.capacityRelated;
+          sawQuotaError ||= error.quotaRelated;
+        } else if (error instanceof DOMException) {
+          sawCapacityError = true;
+        }
+        if (error instanceof GeminiApiError && !error.retryable) break;
       }
     }
-    throw lastError;
+    const code = sawQuotaError
+      ? 'GEMINI_QUOTA_EXHAUSTED'
+      : sawCapacityError
+        ? 'GEMINI_CAPACITY_BUSY'
+        : 'GEMINI_GENERATION_FAILED';
+    const message = code === 'GEMINI_QUOTA_EXHAUSTED'
+      ? '무료 Gemini 사용량 한도에 도달했습니다. 잠시 후 다시 시도해 주세요. 작성 중인 글은 저장되어 있습니다.'
+      : code === 'GEMINI_CAPACITY_BUSY'
+        ? 'Gemini 무료 모델이 현재 혼잡합니다. 잠시 후 다시 시도해 주세요. 작성 중인 글은 저장되어 있습니다.'
+        : lastError instanceof Error
+          ? lastError.message
+          : 'Gemini가 후보를 생성하지 못했습니다.';
+    return Response.json(
+      { code, message, retryable: code !== 'GEMINI_GENERATION_FAILED', retryAfterSeconds: 30, attemptedModels },
+      { status: code === 'GEMINI_GENERATION_FAILED' ? 502 : 503 },
+    );
   } catch (error) {
     return Response.json(
       {
