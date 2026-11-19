@@ -108,7 +108,7 @@ function CandidateCard({
               <span className="text-sm font-bold text-slate-500">자</span>
             </div>
           </div>
-          <span className={`rounded-full px-3 py-1 text-sm font-bold ${difference > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+          <span className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-sm font-bold ${difference > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
             {difference > 0 ? `${difference.toLocaleString()}자 초과` : `${Math.abs(difference).toLocaleString()}자 여유`}
           </span>
         </div>
