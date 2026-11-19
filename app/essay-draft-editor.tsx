@@ -111,6 +111,43 @@ function normalizeSelection(
   return start === end ? null : { start, end, text: source.slice(start, end) };
 }
 
+interface ProtectedLengthNoticeProps {
+  expressionCount: number;
+  protectedLength: number;
+  targetLength: number;
+  overBy: number;
+  className?: string;
+}
+
+function ProtectedLengthNotice({
+  expressionCount,
+  protectedLength,
+  targetLength,
+  overBy,
+  className = '',
+}: ProtectedLengthNoticeProps) {
+  return (
+    <output
+      className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-600 ${className}`}
+    >
+      <span className="flex items-center gap-2 font-extrabold text-slate-900">
+        <AlertTriangle
+          aria-hidden="true"
+          className="size-4 shrink-0 text-amber-600"
+        />
+        보호 표현이 목표보다 {overBy.toLocaleString()}자 많아요
+      </span>
+      <span>
+        보호 {expressionCount}개 · {protectedLength.toLocaleString()}자 / 목표{' '}
+        {targetLength.toLocaleString()}자
+      </span>
+      <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-bold text-blue-700 sm:ml-auto">
+        3안 최소 {protectedLength.toLocaleString()}자
+      </span>
+    </output>
+  );
+}
+
 export function EssayDraftEditor() {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('제목 없는 글');
@@ -660,22 +697,18 @@ export function EssayDraftEditor() {
 
               {protectionUpdateNotice && (
                 <div
-                  className={`mt-3 flex items-start gap-3 rounded-xl border p-3 text-sm font-semibold leading-6 ${
-                    protectionUpdateNotice.removedCount > 0
-                      ? 'border-amber-200 bg-amber-50 text-amber-900'
-                      : 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                  }`}
+                  className="mt-3 flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-2.5 text-sm font-semibold leading-6 text-slate-700"
                   aria-live="polite"
                 >
                   {protectionUpdateNotice.removedCount > 0 ? (
                     <AlertTriangle
                       aria-hidden="true"
-                      className="mt-0.5 size-4 shrink-0"
+                      className="mt-1 size-4 shrink-0 text-amber-600"
                     />
                   ) : (
                     <CheckCircle2
                       aria-hidden="true"
-                      className="mt-0.5 size-4 shrink-0"
+                      className="mt-1 size-4 shrink-0 text-emerald-600"
                     />
                   )}
                   <p>{protectionUpdateNotice.message}</p>
@@ -736,26 +769,13 @@ export function EssayDraftEditor() {
               </div>
 
               {protectedLengthSummary.exceedsTarget && (
-                <output className="mt-3 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
-                  <AlertTriangle
-                    aria-hidden="true"
-                    className="mt-0.5 size-5 shrink-0 text-amber-700"
-                  />
-                  <div>
-                    <p className="text-sm font-extrabold">
-                      보호 표현을 모두 유지하면 목표 글자 수를 맞출 수 없습니다.
-                    </p>
-                    <p className="mt-1 text-sm leading-6">
-                      보호 표현 {protectedExpressions.length}개만 합쳐도{' '}
-                      {protectedLengthSummary.protectedLength.toLocaleString()}
-                      자로, 목표보다{' '}
-                      {protectedLengthSummary.overBy.toLocaleString()}자
-                      많습니다. 보호 우선인 3안은 최소{' '}
-                      {protectedLengthSummary.protectedLength.toLocaleString()}
-                      자가 필요합니다.
-                    </p>
-                  </div>
-                </output>
+                <ProtectedLengthNotice
+                  className="mt-3"
+                  expressionCount={protectedExpressions.length}
+                  protectedLength={protectedLengthSummary.protectedLength}
+                  targetLength={targetLength}
+                  overBy={protectedLengthSummary.overBy}
+                />
               )}
             </div>
 
@@ -804,27 +824,12 @@ export function EssayDraftEditor() {
               </div>
 
               {protectedLengthSummary.exceedsTarget && (
-                <output className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
-                  <AlertTriangle
-                    aria-hidden="true"
-                    className="mt-0.5 size-5 shrink-0 text-amber-700"
-                  />
-                  <div>
-                    <p className="text-sm font-extrabold">
-                      현재 보호 조건에서는 목표 달성이 불가능합니다.
-                    </p>
-                    <p className="mt-1 text-sm leading-6">
-                      보호 표현만{' '}
-                      {protectedLengthSummary.protectedLength.toLocaleString()}
-                      자로 목표보다{' '}
-                      {protectedLengthSummary.overBy.toLocaleString()}자
-                      많습니다. 모두 원문대로 지키는 3안의 최소 필요 길이는{' '}
-                      {protectedLengthSummary.protectedLength.toLocaleString()}
-                      자이며, 1·2안에서는 필요할 때 보호 표현을 조정할 수
-                      있습니다.
-                    </p>
-                  </div>
-                </output>
+                <ProtectedLengthNotice
+                  expressionCount={protectedExpressions.length}
+                  protectedLength={protectedLengthSummary.protectedLength}
+                  targetLength={targetLength}
+                  overBy={protectedLengthSummary.overBy}
+                />
               )}
 
               <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]">
